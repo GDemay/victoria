@@ -4,6 +4,11 @@ let audioContext = null;
 export const initAudioContext = () => {
   if (!audioContext) {
     audioContext = new (window.AudioContext || window.webkitAudioContext)();
+
+    // iOS Safari requires audio context to be resumed after user interaction
+    if (audioContext.state === 'suspended') {
+      audioContext.resume();
+    }
   }
   return audioContext;
 };

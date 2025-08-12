@@ -18,6 +18,26 @@ export default function App() {
 
   const phoneNumber = "+33 4 93 38 12 34";
 
+  // iOS audio initialization
+  const initIOSAudio = async () => {
+    try {
+      // Resume audio context if suspended (iOS requirement)
+      const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      if (audioContext.state === 'suspended') {
+        await audioContext.resume();
+      }
+
+      // Create a silent audio buffer to unlock audio on iOS
+      const buffer = audioContext.createBuffer(1, 1, 22050);
+      const source = audioContext.createBufferSource();
+      source.buffer = buffer;
+      source.connect(audioContext.destination);
+      source.start(0);
+    } catch (error) {
+      console.log('iOS audio init error:', error);
+    }
+  };
+
   // Format call duration
   const formatCallDuration = (seconds) => {
     const mins = Math.floor(seconds / 60);
@@ -43,6 +63,9 @@ export default function App() {
 
   async function startSession() {
     setIsCalling(true);
+
+    // Initialize iOS audio before starting the call
+    await initIOSAudio();
     playDialTone();
 
     // Simulate calling animation for 3 seconds
@@ -57,13 +80,49 @@ export default function App() {
 
       const pc = new RTCPeerConnection();
 
-      // Create audio element for remote audio
+      // Create audio element for remote audio with iOS support
       audioElement.current = document.createElement("audio");
       audioElement.current.autoplay = true;
       audioElement.current.volume = 1.0;
+      audioElement.current.playsInline = true; // Important for iOS
+      audioElement.current.muted = false;
+      audioElement.current.preload = "auto";
+      audioElement.current.controls = false;
+
+      // iOS-specific attributes
+      audioElement.current.setAttribute("webkit-playsinline", "true");
+      audioElement.current.setAttribute("playsinline", "true");
+
       pc.ontrack = (e) => {
         audioElement.current.srcObject = e.streams[0];
-        audioElement.current.play().catch(console.error);
+
+        // iOS-compatible audio play function
+        const playAudio = async () => {
+          try {
+            // Ensure audio context is resumed
+            const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            if (audioContext.state === 'suspended') {
+              await audioContext.resume();
+            }
+
+            // Try to play the audio
+            await audioElement.current.play();
+            console.log('Audio started successfully');
+          } catch (error) {
+            console.log('Audio play failed:', error);
+
+            // For iOS, try different approaches
+            if (error.name === 'NotAllowedError' || error.name === 'NotSupportedError') {
+              // Try unmuting and playing again
+              audioElement.current.muted = false;
+              setTimeout(() => {
+                audioElement.current.play().catch(console.error);
+              }, 100);
+            }
+          }
+        };
+
+        playAudio();
       };
 
       // Get local microphone stream
@@ -354,6 +413,7 @@ export default function App() {
                   ) : (
                     <button
                       onClick={startSession}
+                      onTouchStart={startSession} // iOS touch support
                       disabled={isCalling}
                       className={`w-20 h-20 rounded-full flex items-center justify-center transition-colors ${
                         isCalling
