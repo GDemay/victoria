@@ -1,108 +1,135 @@
 import { useEffect, useRef, useState } from "react";
-import logo from "/assets/openai-logomark.svg";
-import EventLog from "./EventLog";
-import SessionControls from "./SessionControls";
-import ToolPanel from "./ToolPanel";
+import { Phone, PhoneOff, Mic, MicOff, Volume2, VolumeX, Plus, MessageSquare } from "lucide-react";
+import { playDialTone, playHangupSound } from "../utils/audioUtils";
+import { frenchWaiterPrompt } from "../utils/promptLoader.js";
 
 export default function App() {
   const [isSessionActive, setIsSessionActive] = useState(false);
+  const [isCalling, setIsCalling] = useState(false);
+  const [isMuted, setIsMuted] = useState(false);
+  const [isSpeakerOn, setIsSpeakerOn] = useState(false);
+  const [callDuration, setCallDuration] = useState(0);
   const [events, setEvents] = useState([]);
   const [dataChannel, setDataChannel] = useState(null);
   const peerConnection = useRef(null);
   const audioElement = useRef(null);
+  const callTimerRef = useRef(null);
+
+  const phoneNumber = "+33 4 93 38 12 34";
+
+  // Format call duration
+  const formatCallDuration = (seconds) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  // Start call timer
+  const startCallTimer = () => {
+    callTimerRef.current = setInterval(() => {
+      setCallDuration(prev => prev + 1);
+    }, 1000);
+  };
+
+  // Stop call timer
+  const stopCallTimer = () => {
+    if (callTimerRef.current) {
+      clearInterval(callTimerRef.current);
+      callTimerRef.current = null;
+    }
+    setCallDuration(0);
+  };
 
   async function startSession() {
-    // Get a session token for OpenAI Realtime API
-    const tokenResponse = await fetch("/token");
-    const data = await tokenResponse.json();
-    const EPHEMERAL_KEY = data.client_secret.value;
+    setIsCalling(true);
+    playDialTone();
 
-    // Create a peer connection
-    const pc = new RTCPeerConnection();
+    // Simulate calling animation for 3 seconds
+    setTimeout(async () => {
+      setIsCalling(false);
+      setIsSessionActive(true);
+      startCallTimer();
 
-    // Set up to play remote audio from the model
-    audioElement.current = document.createElement("audio");
-    audioElement.current.autoplay = true;
-    pc.ontrack = (e) => (audioElement.current.srcObject = e.streams[0]);
+      const tokenResponse = await fetch("/token");
+      const data = await tokenResponse.json();
+      const EPHEMERAL_KEY = data.client_secret.value;
 
-    // Add local audio track for microphone input in the browser
-    const ms = await navigator.mediaDevices.getUserMedia({
-      audio: true,
-    });
-    pc.addTrack(ms.getTracks()[0]);
+      const pc = new RTCPeerConnection();
 
-    // Set up data channel for sending and receiving events
-    const dc = pc.createDataChannel("oai-events");
-    setDataChannel(dc);
+      audioElement.current = document.createElement("audio");
+      audioElement.current.autoplay = true;
+      pc.ontrack = (e) => (audioElement.current.srcObject = e.streams[0]);
 
-    // Start the session using the Session Description Protocol (SDP)
-    const offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
+      const ms = await navigator.mediaDevices.getUserMedia({
+        audio: true,
+      });
+      pc.addTrack(ms.getTracks()[0]);
 
-    const baseUrl = "https://api.openai.com/v1/realtime";
-    const model = "gpt-4o-realtime-preview-2024-12-17";
-    const sdpResponse = await fetch(`${baseUrl}?model=${model}`, {
-      method: "POST",
-      body: offer.sdp,
-      headers: {
-        Authorization: `Bearer ${EPHEMERAL_KEY}`,
-        "Content-Type": "application/sdp",
-      },
-    });
+      const dc = pc.createDataChannel("oai-events");
+      setDataChannel(dc);
 
-    const answer = {
-      type: "answer",
-      sdp: await sdpResponse.text(),
-    };
-    await pc.setRemoteDescription(answer);
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
 
-    peerConnection.current = pc;
+      const baseUrl = "https://api.openai.com/v1/realtime";
+      const model = "gpt-4o-realtime-preview-2024-12-17";
+      const sdpResponse = await fetch(`${baseUrl}?model=${model}`, {
+        method: "POST",
+        body: offer.sdp,
+        headers: {
+          Authorization: `Bearer ${EPHEMERAL_KEY}`,
+          "Content-Type": "application/sdp",
+        },
+      });
+
+      const answer = {
+        type: "answer",
+        sdp: await sdpResponse.text(),
+      };
+      await pc.setRemoteDescription(answer);
+
+      peerConnection.current = pc;
+    }, 3000);
   }
 
-  // Stop current session, clean up peer connection and data channel
   function stopSession() {
     if (dataChannel) {
       dataChannel.close();
     }
 
-    peerConnection.current.getSenders().forEach((sender) => {
-      if (sender.track) {
-        sender.track.stop();
-      }
-    });
-
     if (peerConnection.current) {
+      peerConnection.current.getSenders().forEach((sender) => {
+        if (sender.track) {
+          sender.track.stop();
+        }
+      });
       peerConnection.current.close();
     }
 
+    playHangupSound();
+    stopCallTimer();
     setIsSessionActive(false);
+    setIsCalling(false);
+    setIsMuted(false);
+    setIsSpeakerOn(false);
     setDataChannel(null);
     peerConnection.current = null;
   }
 
-  // Send a message to the model
   function sendClientEvent(message) {
     if (dataChannel) {
       const timestamp = new Date().toLocaleTimeString();
       message.event_id = message.event_id || crypto.randomUUID();
 
-      // send event before setting timestamp since the backend peer doesn't expect this field
       dataChannel.send(JSON.stringify(message));
 
-      // if guard just in case the timestamp exists by miracle
       if (!message.timestamp) {
         message.timestamp = timestamp;
       }
       setEvents((prev) => [message, ...prev]);
-    } else {
-      console.error(
-        "Failed to send message - no data channel available",
-        message,
-      );
     }
   }
 
-  // Send a text message to the model
   function sendTextMessage(message) {
     const event = {
       type: "conversation.item.create",
@@ -122,60 +149,180 @@ export default function App() {
     sendClientEvent({ type: "response.create" });
   }
 
-  // Attach event listeners to the data channel when a new one is created
   useEffect(() => {
     if (dataChannel) {
-      // Append new server events to the list
       dataChannel.addEventListener("message", (e) => {
         const event = JSON.parse(e.data);
         if (!event.timestamp) {
           event.timestamp = new Date().toLocaleTimeString();
         }
-
         setEvents((prev) => [event, ...prev]);
       });
 
-      // Set session active when the data channel is opened
       dataChannel.addEventListener("open", () => {
-        setIsSessionActive(true);
-        setEvents([]);
+        sendClientEvent({
+          type: "response.create",
+          response: {
+            instructions: frenchWaiterPrompt,
+          },
+        });
       });
     }
   }, [dataChannel]);
 
+  // Cleanup timer on unmount
+  useEffect(() => {
+    return () => {
+      if (callTimerRef.current) {
+        clearInterval(callTimerRef.current);
+      }
+    };
+  }, []);
+
   return (
-    <>
-      <nav className="absolute top-0 left-0 right-0 h-16 flex items-center">
-        <div className="flex items-center gap-4 w-full m-4 pb-2 border-0 border-b border-solid border-gray-200">
-          <img style={{ width: "24px" }} src={logo} />
-          <h1>realtime console</h1>
+    <div className="min-h-screen bg-black flex items-center justify-center p-4">
+      {/* iPhone Frame */}
+      <div className="relative">
+        {/* iPhone Border */}
+        <div className="w-80 h-[600px] bg-gray-900 rounded-[3rem] border-8 border-gray-800 shadow-2xl">
+          {/* Notch */}
+          <div className="absolute top-0 left-1/2 transform -translate-x-1/2 w-32 h-6 bg-black rounded-b-3xl z-10"></div>
+
+          {/* Screen Content */}
+          <div className="w-full h-full bg-black rounded-[2rem] overflow-hidden relative">
+            {/* Status Bar */}
+            <div className="flex justify-between items-center px-6 pt-8 pb-4 text-white text-sm">
+              <span>{new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</span>
+              <div className="flex items-center gap-1">
+                <div className="w-6 h-3 border border-white rounded-sm">
+                  <div className="w-4 h-1 bg-white rounded-sm m-0.5"></div>
+                </div>
+                <span>100%</span>
+              </div>
+            </div>
+
+            {/* Call Interface */}
+            <div className="flex flex-col h-full px-6">
+              {/* Call Info - Centered */}
+              <div className="flex-1 flex flex-col items-center justify-center text-center">
+                {isCalling ? (
+                  // Calling Animation
+                  <div className="space-y-8">
+                    <div className="w-24 h-24 bg-green-500 rounded-full flex items-center justify-center animate-pulse">
+                      <Phone className="w-12 h-12 text-white animate-bounce" />
+                    </div>
+                    <div>
+                      <div className="text-white text-2xl font-light mb-3">
+                        {phoneNumber}
+                      </div>
+                      <div className="text-gray-400 text-base animate-pulse">
+                        Appel en cours...
+                      </div>
+                    </div>
+                  </div>
+                ) : isSessionActive ? (
+                  // Active Call
+                  <div className="space-y-8">
+                    <div>
+                      <div className="text-white text-2xl font-light mb-3">
+                        Restaurant Zuma
+                      </div>
+                      <div className="text-green-400 text-base">
+                        {formatCallDuration(callDuration)}
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  // Idle State
+                  <div className="space-y-8">
+                    <div>
+                      <div className="text-white text-2xl font-light mb-3">
+                        {phoneNumber}
+                      </div>
+                      <div className="text-gray-400 text-base">
+                        Restaurant Zuma
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Call Controls */}
+              <div className="pb-8">
+                {isSessionActive && (
+                  <div className="grid grid-cols-3 gap-8 mb-8">
+                    {/* Mute */}
+                    <button
+                      onClick={() => setIsMuted(!isMuted)}
+                      className={`w-14 h-14 rounded-full flex items-center justify-center ${
+                        isMuted ? 'bg-red-500' : 'bg-gray-700'
+                      }`}
+                    >
+                      {isMuted ? (
+                        <MicOff className="w-7 h-7 text-white" />
+                      ) : (
+                        <Mic className="w-7 h-7 text-white" />
+                      )}
+                    </button>
+
+                    {/* Speaker */}
+                    <button
+                      onClick={() => setIsSpeakerOn(!isSpeakerOn)}
+                      className={`w-14 h-14 rounded-full flex items-center justify-center ${
+                        isSpeakerOn ? 'bg-blue-500' : 'bg-gray-700'
+                      }`}
+                    >
+                      {isSpeakerOn ? (
+                        <Volume2 className="w-7 h-7 text-white" />
+                      ) : (
+                        <VolumeX className="w-7 h-7 text-white" />
+                      )}
+                    </button>
+
+                    {/* Add Call */}
+                    <button className="w-14 h-14 bg-gray-700 rounded-full flex items-center justify-center">
+                      <Plus className="w-7 h-7 text-white" />
+                    </button>
+                  </div>
+                )}
+
+                {/* Main Call Button */}
+                <div className="flex justify-center mb-6">
+                  {isSessionActive ? (
+                    <button
+                      onClick={stopSession}
+                      className="w-20 h-20 bg-red-500 rounded-full flex items-center justify-center hover:bg-red-600 transition-colors"
+                    >
+                      <PhoneOff className="w-10 h-10 text-white" />
+                    </button>
+                  ) : (
+                    <button
+                      onClick={startSession}
+                      disabled={isCalling}
+                      className={`w-20 h-20 rounded-full flex items-center justify-center transition-colors ${
+                        isCalling
+                          ? 'bg-gray-600 cursor-not-allowed'
+                          : 'bg-green-500 hover:bg-green-600'
+                      }`}
+                    >
+                      <Phone className="w-10 h-10 text-white" />
+                    </button>
+                  )}
+                </div>
+
+                {/* Keyboard Button (only when in call) */}
+                {isSessionActive && (
+                  <div className="flex justify-center">
+                    <button className="w-14 h-14 bg-gray-700 rounded-full flex items-center justify-center">
+                      <MessageSquare className="w-7 h-7 text-white" />
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
         </div>
-      </nav>
-      <main className="absolute top-16 left-0 right-0 bottom-0">
-        <section className="absolute top-0 left-0 right-[380px] bottom-0 flex">
-          <section className="absolute top-0 left-0 right-0 bottom-32 px-4 overflow-y-auto">
-            <EventLog events={events} />
-          </section>
-          <section className="absolute h-32 left-0 right-0 bottom-0 p-4">
-            <SessionControls
-              startSession={startSession}
-              stopSession={stopSession}
-              sendClientEvent={sendClientEvent}
-              sendTextMessage={sendTextMessage}
-              events={events}
-              isSessionActive={isSessionActive}
-            />
-          </section>
-        </section>
-        <section className="absolute top-0 w-[380px] right-0 bottom-0 p-4 pt-0 overflow-y-auto">
-          <ToolPanel
-            sendClientEvent={sendClientEvent}
-            sendTextMessage={sendTextMessage}
-            events={events}
-            isSessionActive={isSessionActive}
-          />
-        </section>
-      </main>
-    </>
+      </div>
+    </div>
   );
 }

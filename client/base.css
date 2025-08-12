@@ -1,14 +1,9 @@
-/*
-@tailwind base; adds base styles to all elements:
-https://tailwindcss.com/docs/preflight
-*/
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 :root {
-  --color-base: #efefef;
-  --color-highlight: #ff80ff;
+  --color-base: #000000;
 }
 
 html,
@@ -18,7 +13,6 @@ body {
   margin: 0;
   padding: 0;
   overflow: hidden;
-  font-family: "Consolas", "Andale Mono", monospace;
-  font-size: 0.9rem;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Cantarell", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif;
   background-color: var(--color-base);
 }
