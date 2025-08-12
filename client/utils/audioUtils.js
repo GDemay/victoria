@@ -15,31 +15,41 @@ export const initAudioContext = () => {
 
 // Generate dial tone sound (2 seconds)
 export const playDialTone = () => {
-  const ctx = initAudioContext();
+  try {
+    const ctx = initAudioContext();
 
-  // Create oscillator for dial tone
-  const oscillator = ctx.createOscillator();
-  const gainNode = ctx.createGain();
+    // Resume audio context if suspended (iOS requirement)
+    if (ctx.state === 'suspended') {
+      ctx.resume();
+    }
 
-  oscillator.connect(gainNode);
-  gainNode.connect(ctx.destination);
+    // Create oscillator for dial tone
+    const oscillator = ctx.createOscillator();
+    const gainNode = ctx.createGain();
 
-  // Set frequency to typical dial tone (350Hz + 440Hz)
-  oscillator.frequency.setValueAtTime(350, ctx.currentTime);
+    oscillator.connect(gainNode);
+    gainNode.connect(ctx.destination);
 
-  // Create a second oscillator for the dual tone
-  const oscillator2 = ctx.createOscillator();
-  oscillator2.connect(gainNode);
-  oscillator2.frequency.setValueAtTime(440, ctx.currentTime);
+    // Set frequency to typical dial tone (350Hz + 440Hz)
+    oscillator.frequency.setValueAtTime(350, ctx.currentTime);
 
-  // Set volume
-  gainNode.gain.setValueAtTime(0.1, ctx.currentTime);
+    // Create a second oscillator for the dual tone
+    const oscillator2 = ctx.createOscillator();
+    oscillator2.connect(gainNode);
+    oscillator2.frequency.setValueAtTime(440, ctx.currentTime);
 
-  // Start and stop after 2 seconds
-  oscillator.start(ctx.currentTime);
-  oscillator2.start(ctx.currentTime);
-  oscillator.stop(ctx.currentTime + 2);
-  oscillator2.stop(ctx.currentTime + 2);
+    // Set volume (lower for iOS)
+    gainNode.gain.setValueAtTime(0.05, ctx.currentTime);
+
+    // Start and stop after 2 seconds
+    oscillator.start(ctx.currentTime);
+    oscillator2.start(ctx.currentTime);
+    oscillator.stop(ctx.currentTime + 2);
+    oscillator2.stop(ctx.currentTime + 2);
+  } catch (error) {
+    console.log('Dial tone error:', error);
+    // Don't throw, just log the error
+  }
 };
 
 // Generate hangup sound (short beep)

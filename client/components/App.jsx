@@ -64,15 +64,33 @@ export default function App() {
   async function startSession() {
     setIsCalling(true);
 
-    // Initialize iOS audio before starting the call
-    await initIOSAudio();
-    playDialTone();
+    // Safety timeout to prevent stuck calling state (5 seconds max)
+    const safetyTimeout = setTimeout(() => {
+      if (isCalling) {
+        console.log('Safety timeout: forcing call to active state');
+        setIsCalling(false);
+        setIsSessionActive(true);
+        startCallTimer();
+      }
+    }, 5000);
 
-    // Simulate calling animation for 3 seconds
-    setTimeout(async () => {
-      setIsCalling(false);
-      setIsSessionActive(true);
-      startCallTimer();
+    try {
+      // Initialize iOS audio before starting the call
+      await initIOSAudio();
+
+      // Play dial tone with error handling
+      try {
+        playDialTone();
+      } catch (error) {
+        console.log('Dial tone failed:', error);
+        // Continue anyway, don't block the call
+      }
+
+            // Simulate calling animation for 3 seconds
+      const callTimeout = setTimeout(async () => {
+        setIsCalling(false);
+        setIsSessionActive(true);
+        startCallTimer();
 
       const tokenResponse = await fetch("/token");
       const data = await tokenResponse.json();
@@ -156,7 +174,16 @@ export default function App() {
       await pc.setRemoteDescription(answer);
 
       peerConnection.current = pc;
+
+      // Clear safety timeout since call started successfully
+      clearTimeout(safetyTimeout);
     }, 3000);
+    } catch (error) {
+      console.error('Failed to start session:', error);
+      setIsCalling(false);
+      setIsSessionActive(false);
+      clearTimeout(safetyTimeout);
+    }
   }
 
   function stopSession() {
