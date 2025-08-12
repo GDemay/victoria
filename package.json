@@ -7,7 +7,8 @@
     "build:client": "vite build --outDir dist/client --ssrManifest",
     "build:server": "vite build --outDir dist/server --ssr /index.js",
     "devinstall": "zx ../../devinstall.mjs -- node server.js --dev",
-    "lint": "eslint . --ext .js,.jsx --fix"
+    "lint": "eslint . --ext .js,.jsx --fix",
+    "postinstall": "npm run build"
   },
   "dependencies": {
     "@radix-ui/react-slot": "^1.2.3",
