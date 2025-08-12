@@ -13,6 +13,7 @@ export default function App() {
   const [dataChannel, setDataChannel] = useState(null);
   const peerConnection = useRef(null);
   const audioElement = useRef(null);
+  const localStream = useRef(null);
   const callTimerRef = useRef(null);
 
   const phoneNumber = "+33 4 93 38 12 34";
@@ -56,13 +57,20 @@ export default function App() {
 
       const pc = new RTCPeerConnection();
 
+      // Create audio element for remote audio
       audioElement.current = document.createElement("audio");
       audioElement.current.autoplay = true;
-      pc.ontrack = (e) => (audioElement.current.srcObject = e.streams[0]);
+      audioElement.current.volume = 1.0;
+      pc.ontrack = (e) => {
+        audioElement.current.srcObject = e.streams[0];
+        audioElement.current.play().catch(console.error);
+      };
 
+      // Get local microphone stream
       const ms = await navigator.mediaDevices.getUserMedia({
         audio: true,
       });
+      localStream.current = ms;
       pc.addTrack(ms.getTracks()[0]);
 
       const dc = pc.createDataChannel("oai-events");
@@ -104,6 +112,18 @@ export default function App() {
         }
       });
       peerConnection.current.close();
+    }
+
+    // Stop local stream
+    if (localStream.current) {
+      localStream.current.getTracks().forEach(track => track.stop());
+      localStream.current = null;
+    }
+
+    // Clean up audio element
+    if (audioElement.current) {
+      audioElement.current.srcObject = null;
+      audioElement.current = null;
     }
 
     playHangupSound();
@@ -149,6 +169,29 @@ export default function App() {
     sendClientEvent({ type: "response.create" });
   }
 
+  // Handle mute functionality
+  const handleMuteToggle = () => {
+    if (localStream.current) {
+      const audioTrack = localStream.current.getAudioTracks()[0];
+      if (audioTrack) {
+        audioTrack.enabled = !audioTrack.enabled;
+        setIsMuted(!audioTrack.enabled);
+      }
+    }
+  };
+
+  // Handle speaker functionality
+  const handleSpeakerToggle = () => {
+    if (audioElement.current) {
+      if (isSpeakerOn) {
+        audioElement.current.volume = 0.5; // Normal volume
+      } else {
+        audioElement.current.volume = 1.0; // Loud volume for speaker
+      }
+      setIsSpeakerOn(!isSpeakerOn);
+    }
+  };
+
   useEffect(() => {
     if (dataChannel) {
       dataChannel.addEventListener("message", (e) => {
@@ -170,11 +213,24 @@ export default function App() {
     }
   }, [dataChannel]);
 
-  // Cleanup timer on unmount
+  // Cleanup timer and audio on unmount
   useEffect(() => {
     return () => {
       if (callTimerRef.current) {
         clearInterval(callTimerRef.current);
+      }
+
+      // Clean up audio streams
+      if (localStream.current) {
+        localStream.current.getTracks().forEach(track => track.stop());
+      }
+
+      if (audioElement.current) {
+        audioElement.current.srcObject = null;
+      }
+
+      if (peerConnection.current) {
+        peerConnection.current.close();
       }
     };
   }, []);
@@ -253,7 +309,7 @@ export default function App() {
                   <div className="grid grid-cols-3 gap-8 mb-8">
                     {/* Mute */}
                     <button
-                      onClick={() => setIsMuted(!isMuted)}
+                      onClick={handleMuteToggle}
                       className={`w-14 h-14 rounded-full flex items-center justify-center ${
                         isMuted ? 'bg-red-500' : 'bg-gray-700'
                       }`}
@@ -267,7 +323,7 @@ export default function App() {
 
                     {/* Speaker */}
                     <button
-                      onClick={() => setIsSpeakerOn(!isSpeakerOn)}
+                      onClick={handleSpeakerToggle}
                       className={`w-14 h-14 rounded-full flex items-center justify-center ${
                         isSpeakerOn ? 'bg-blue-500' : 'bg-gray-700'
                       }`}
