@@ -5,7 +5,6 @@ export const initAudioContext = () => {
   if (!audioContext) {
     audioContext = new (window.AudioContext || window.webkitAudioContext)();
 
-    // iOS Safari requires audio context to be resumed after user interaction
     if (audioContext.state === 'suspended') {
       audioContext.resume();
     }
@@ -17,11 +16,6 @@ export const initAudioContext = () => {
 export const playDialTone = () => {
   try {
     const ctx = initAudioContext();
-
-    // Resume audio context if suspended (iOS requirement)
-    if (ctx.state === 'suspended') {
-      ctx.resume();
-    }
 
     // Create oscillator for dial tone
     const oscillator = ctx.createOscillator();
@@ -38,8 +32,8 @@ export const playDialTone = () => {
     oscillator2.connect(gainNode);
     oscillator2.frequency.setValueAtTime(440, ctx.currentTime);
 
-    // Set volume (lower for iOS)
-    gainNode.gain.setValueAtTime(0.05, ctx.currentTime);
+    // Set normal volume
+    gainNode.gain.setValueAtTime(0.1, ctx.currentTime);
 
     // Start and stop after 2 seconds
     oscillator.start(ctx.currentTime);
@@ -48,57 +42,64 @@ export const playDialTone = () => {
     oscillator2.stop(ctx.currentTime + 2);
   } catch (error) {
     console.log('Dial tone error:', error);
-    // Don't throw, just log the error
   }
 };
 
 // Generate hangup sound (short beep)
 export const playHangupSound = () => {
-  const ctx = initAudioContext();
+  try {
+    const ctx = initAudioContext();
 
-  const oscillator = ctx.createOscillator();
-  const gainNode = ctx.createGain();
+    const oscillator = ctx.createOscillator();
+    const gainNode = ctx.createGain();
 
-  oscillator.connect(gainNode);
-  gainNode.connect(ctx.destination);
+    oscillator.connect(gainNode);
+    gainNode.connect(ctx.destination);
 
-  // Set frequency for hangup sound
-  oscillator.frequency.setValueAtTime(800, ctx.currentTime);
+    // Set frequency for hangup sound
+    oscillator.frequency.setValueAtTime(800, ctx.currentTime);
 
-  // Set volume with fade out
-  gainNode.gain.setValueAtTime(0.2, ctx.currentTime);
-  gainNode.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
+    // Set volume with fade out
+    gainNode.gain.setValueAtTime(0.2, ctx.currentTime);
+    gainNode.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
 
-  // Start and stop after 0.3 seconds
-  oscillator.start(ctx.currentTime);
-  oscillator.stop(ctx.currentTime + 0.3);
+    // Start and stop after 0.3 seconds
+    oscillator.start(ctx.currentTime);
+    oscillator.stop(ctx.currentTime + 0.3);
+  } catch (error) {
+    console.log('Hangup sound error:', error);
+  }
 };
 
 // Generate ring tone sound
 export const playRingTone = () => {
-  const ctx = initAudioContext();
+  try {
+    const ctx = initAudioContext();
 
-  const oscillator = ctx.createOscillator();
-  const gainNode = ctx.createGain();
+    const oscillator = ctx.createOscillator();
+    const gainNode = ctx.createGain();
 
-  oscillator.connect(gainNode);
-  gainNode.connect(ctx.destination);
+    oscillator.connect(gainNode);
+    gainNode.connect(ctx.destination);
 
-  // Set frequency for ring tone
-  oscillator.frequency.setValueAtTime(480, ctx.currentTime);
+    // Set frequency for ring tone
+    oscillator.frequency.setValueAtTime(480, ctx.currentTime);
 
-  // Create pulsing effect
-  const pulseGain = ctx.createGain();
-  pulseGain.connect(gainNode);
-  oscillator.connect(pulseGain);
+    // Create pulsing effect
+    const pulseGain = ctx.createGain();
+    pulseGain.connect(gainNode);
+    oscillator.connect(pulseGain);
 
-  // Set volume with pulsing
-  pulseGain.gain.setValueAtTime(0.15, ctx.currentTime);
-  pulseGain.gain.setValueAtTime(0.05, ctx.currentTime + 0.5);
-  pulseGain.gain.setValueAtTime(0.15, ctx.currentTime + 1);
-  pulseGain.gain.setValueAtTime(0.05, ctx.currentTime + 1.5);
+    // Set volume with pulsing
+    pulseGain.gain.setValueAtTime(0.2, ctx.currentTime);
+    pulseGain.gain.setValueAtTime(0.1, ctx.currentTime + 0.5);
+    pulseGain.gain.setValueAtTime(0.2, ctx.currentTime + 1);
+    pulseGain.gain.setValueAtTime(0.1, ctx.currentTime + 1.5);
 
-  // Start and stop after 2 seconds
-  oscillator.start(ctx.currentTime);
-  oscillator.stop(ctx.currentTime + 2);
+    // Start and stop after 2 seconds
+    oscillator.start(ctx.currentTime);
+    oscillator.stop(ctx.currentTime + 2);
+  } catch (error) {
+    console.log('Ring tone error:', error);
+  }
 };

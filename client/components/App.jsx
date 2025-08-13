@@ -18,23 +18,16 @@ export default function App() {
 
   const phoneNumber = "+33 4 93 38 12 34";
 
-  // iOS audio initialization
-  const initIOSAudio = async () => {
+    // Non-blocking audio initialization
+  const initAudio = () => {
+    // Initialize audio context without blocking
     try {
-      // Resume audio context if suspended (iOS requirement)
       const audioContext = new (window.AudioContext || window.webkitAudioContext)();
       if (audioContext.state === 'suspended') {
-        await audioContext.resume();
+        audioContext.resume().catch(console.log);
       }
-
-      // Create a silent audio buffer to unlock audio on iOS
-      const buffer = audioContext.createBuffer(1, 1, 22050);
-      const source = audioContext.createBufferSource();
-      source.buffer = buffer;
-      source.connect(audioContext.destination);
-      source.start(0);
     } catch (error) {
-      console.log('iOS audio init error:', error);
+      console.log('Audio context init error:', error);
     }
   };
 
@@ -64,126 +57,85 @@ export default function App() {
   async function startSession() {
     setIsCalling(true);
 
-    // Safety timeout to prevent stuck calling state (5 seconds max)
-    const safetyTimeout = setTimeout(() => {
-      if (isCalling) {
-        console.log('Safety timeout: forcing call to active state');
-        setIsCalling(false);
-        setIsSessionActive(true);
-        startCallTimer();
-      }
-    }, 5000);
+    // Initialize audio non-blocking
+    initAudio();
 
-    try {
-      // Initialize iOS audio before starting the call
-      await initIOSAudio();
-
-      // Play dial tone with error handling
+    // Play dial tone non-blocking
+    setTimeout(() => {
       try {
         playDialTone();
       } catch (error) {
         console.log('Dial tone failed:', error);
-        // Continue anyway, don't block the call
       }
+    }, 100);
 
-            // Simulate calling animation for 3 seconds
-      const callTimeout = setTimeout(async () => {
+    // Start call setup after 3 seconds
+    setTimeout(async () => {
+      try {
         setIsCalling(false);
         setIsSessionActive(true);
         startCallTimer();
 
-      const tokenResponse = await fetch("/token");
-      const data = await tokenResponse.json();
-      const EPHEMERAL_KEY = data.client_secret.value;
+        const tokenResponse = await fetch("/token");
+        const data = await tokenResponse.json();
+        const EPHEMERAL_KEY = data.client_secret.value;
 
-      const pc = new RTCPeerConnection();
+        const pc = new RTCPeerConnection();
 
-      // Create audio element for remote audio with iOS support
-      audioElement.current = document.createElement("audio");
-      audioElement.current.autoplay = true;
-      audioElement.current.volume = 1.0;
-      audioElement.current.playsInline = true; // Important for iOS
-      audioElement.current.muted = false;
-      audioElement.current.preload = "auto";
-      audioElement.current.controls = false;
+        // Create audio element for remote audio
+        audioElement.current = document.createElement("audio");
+        audioElement.current.autoplay = true;
+        audioElement.current.volume = 1.0;
+        audioElement.current.muted = false;
+        audioElement.current.preload = "auto";
+        audioElement.current.controls = false;
 
-      // iOS-specific attributes
-      audioElement.current.setAttribute("webkit-playsinline", "true");
-      audioElement.current.setAttribute("playsinline", "true");
+        pc.ontrack = (e) => {
+          audioElement.current.srcObject = e.streams[0];
 
-      pc.ontrack = (e) => {
-        audioElement.current.srcObject = e.streams[0];
-
-        // iOS-compatible audio play function
-        const playAudio = async () => {
-          try {
-            // Ensure audio context is resumed
-            const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-            if (audioContext.state === 'suspended') {
-              await audioContext.resume();
-            }
-
-            // Try to play the audio
-            await audioElement.current.play();
-            console.log('Audio started successfully');
-          } catch (error) {
-            console.log('Audio play failed:', error);
-
-            // For iOS, try different approaches
-            if (error.name === 'NotAllowedError' || error.name === 'NotSupportedError') {
-              // Try unmuting and playing again
-              audioElement.current.muted = false;
-              setTimeout(() => {
-                audioElement.current.play().catch(console.error);
-              }, 100);
-            }
-          }
+          // Non-blocking audio play
+          setTimeout(() => {
+            audioElement.current.play().catch(console.error);
+          }, 100);
         };
 
-        playAudio();
-      };
+        // Get local microphone stream
+        const ms = await navigator.mediaDevices.getUserMedia({
+          audio: true,
+        });
+        localStream.current = ms;
+        pc.addTrack(ms.getTracks()[0]);
 
-      // Get local microphone stream
-      const ms = await navigator.mediaDevices.getUserMedia({
-        audio: true,
-      });
-      localStream.current = ms;
-      pc.addTrack(ms.getTracks()[0]);
+        const dc = pc.createDataChannel("oai-events");
+        setDataChannel(dc);
 
-      const dc = pc.createDataChannel("oai-events");
-      setDataChannel(dc);
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
 
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
+        const baseUrl = "https://api.openai.com/v1/realtime";
+        const model = "gpt-4o-realtime-preview-2024-12-17";
+        const sdpResponse = await fetch(`${baseUrl}?model=${model}`, {
+          method: "POST",
+          body: offer.sdp,
+          headers: {
+            Authorization: `Bearer ${EPHEMERAL_KEY}`,
+            "Content-Type": "application/sdp",
+          },
+        });
 
-      const baseUrl = "https://api.openai.com/v1/realtime";
-      const model = "gpt-4o-realtime-preview-2024-12-17";
-      const sdpResponse = await fetch(`${baseUrl}?model=${model}`, {
-        method: "POST",
-        body: offer.sdp,
-        headers: {
-          Authorization: `Bearer ${EPHEMERAL_KEY}`,
-          "Content-Type": "application/sdp",
-        },
-      });
+        const answer = {
+          type: "answer",
+          sdp: await sdpResponse.text(),
+        };
+        await pc.setRemoteDescription(answer);
 
-      const answer = {
-        type: "answer",
-        sdp: await sdpResponse.text(),
-      };
-      await pc.setRemoteDescription(answer);
-
-      peerConnection.current = pc;
-
-      // Clear safety timeout since call started successfully
-      clearTimeout(safetyTimeout);
+        peerConnection.current = pc;
+      } catch (error) {
+        console.error('Failed to start session:', error);
+        setIsCalling(false);
+        setIsSessionActive(false);
+      }
     }, 3000);
-    } catch (error) {
-      console.error('Failed to start session:', error);
-      setIsCalling(false);
-      setIsSessionActive(false);
-      clearTimeout(safetyTimeout);
-    }
   }
 
   function stopSession() {
@@ -212,7 +164,15 @@ export default function App() {
       audioElement.current = null;
     }
 
-    playHangupSound();
+    // Play hangup sound non-blocking
+    setTimeout(() => {
+      try {
+        playHangupSound();
+      } catch (error) {
+        console.log('Hangup sound failed:', error);
+      }
+    }, 100);
+
     stopCallTimer();
     setIsSessionActive(false);
     setIsCalling(false);
@@ -440,7 +400,6 @@ export default function App() {
                   ) : (
                     <button
                       onClick={startSession}
-                      onTouchStart={startSession} // iOS touch support
                       disabled={isCalling}
                       className={`w-20 h-20 rounded-full flex items-center justify-center transition-colors ${
                         isCalling
