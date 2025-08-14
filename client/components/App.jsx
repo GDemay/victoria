@@ -1,6 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { Phone, PhoneOff, Mic, MicOff, Volume2, VolumeX, Plus, MessageSquare } from "lucide-react";
-import { playDialTone, playHangupSound } from "../utils/audioUtils";
+import {
+  playDialTone,
+  playHangupSound,
+  initializeAudioSystem,
+  isIOS,
+  setupIOSAudio,
+  enhanceAudioStream
+} from "../utils/audioUtils";
 import { frenchWaiterPrompt } from "../utils/promptLoader.js";
 
 export default function App() {
@@ -11,6 +18,8 @@ export default function App() {
   const [callDuration, setCallDuration] = useState(0);
   const [events, setEvents] = useState([]);
   const [dataChannel, setDataChannel] = useState(null);
+  const [audioInitialized, setAudioInitialized] = useState(false);
+  const [audioError, setAudioError] = useState(null);
   const peerConnection = useRef(null);
   const audioElement = useRef(null);
   const localStream = useRef(null);
@@ -18,16 +27,33 @@ export default function App() {
 
   const phoneNumber = "+33 4 93 38 12 34";
 
-    // Non-blocking audio initialization
-  const initAudio = () => {
-    // Initialize audio context without blocking
+    // Simplified audio initialization
+  const initAudio = async (userInitiated = true) => {
     try {
-      const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-      if (audioContext.state === 'suspended') {
-        audioContext.resume().catch(console.log);
+      // Initialize audio system with cross-platform support
+      const success = await initializeAudioSystem(userInitiated);
+
+      // Special handling for iOS
+      if (isIOS()) {
+        try {
+          await setupIOSAudio();
+        } catch (iosError) {
+          console.warn("iOS audio setup failed:", iosError);
+          // Continue anyway
+        }
       }
+
+      setAudioInitialized(success);
+      if (!success) {
+        console.warn("Audio initialization failed");
+        // Don't set error yet, as we can still try to proceed
+      }
+
+      return true; // Always return true to proceed with call
     } catch (error) {
-      console.log('Audio context init error:', error);
+      console.error('Audio context init error:', error);
+      // Don't set error message yet, let's try to proceed anyway
+      return true; // Still return true to proceed with call
     }
   };
 
@@ -56,129 +82,248 @@ export default function App() {
 
   async function startSession() {
     setIsCalling(true);
+    setAudioError(null);
 
-    // Initialize audio non-blocking
-    initAudio();
+    try {
+      // Initialize audio with user interaction (button click)
+      const audioReady = await initAudio(true);
 
-    // Play dial tone non-blocking
-    setTimeout(() => {
+      if (!audioReady) {
+        console.warn("Audio system not initialized properly");
+        // Continue anyway, but we've set the error state
+      }
+
+      // Play dial tone
       try {
         playDialTone();
       } catch (error) {
-        console.log('Dial tone failed:', error);
+        console.warn('Dial tone failed:', error);
+        // Non-critical error, continue with call
       }
-    }, 100);
 
-    // Start call setup after 3 seconds
-    setTimeout(async () => {
-      try {
-        setIsCalling(false);
-        setIsSessionActive(true);
-        startCallTimer();
+      // Start call setup after dial tone completes (or after 3 seconds)
+      setTimeout(async () => {
+        try {
+          setIsCalling(false);
+          setIsSessionActive(true);
+          startCallTimer();
 
-        const tokenResponse = await fetch("/token");
-        const data = await tokenResponse.json();
-        const EPHEMERAL_KEY = data.client_secret.value;
+          // Get token for OpenAI session
+          const tokenResponse = await fetch("/token");
+          const data = await tokenResponse.json();
+          const EPHEMERAL_KEY = data.client_secret.value;
 
-        const pc = new RTCPeerConnection();
+          // Create and configure RTCPeerConnection
+          const pc = new RTCPeerConnection({
+            // ICE servers configuration for better connectivity
+            iceServers: [
+              { urls: "stun:stun.l.google.com:19302" },
+              { urls: "stun:stun1.l.google.com:19302" }
+            ],
+            // For better mobile performance
+            sdpSemantics: 'unified-plan',
+            iceCandidatePoolSize: 10
+          });
 
-        // Create audio element for remote audio
-        audioElement.current = document.createElement("audio");
-        audioElement.current.autoplay = true;
-        audioElement.current.volume = 1.0;
-        audioElement.current.muted = false;
-        audioElement.current.preload = "auto";
-        audioElement.current.controls = false;
+                    // Create simple audio element for remote audio
+          audioElement.current = document.createElement("audio");
+          audioElement.current.autoplay = true;
+          audioElement.current.volume = 1.0;
+          audioElement.current.muted = false;
 
-        pc.ontrack = (e) => {
-          audioElement.current.srcObject = e.streams[0];
+          // Add iOS-specific attributes
+          audioElement.current.setAttribute('playsinline', '');
+          audioElement.current.setAttribute('webkit-playsinline', '');
 
-          // Non-blocking audio play
-          setTimeout(() => {
-            audioElement.current.play().catch(console.error);
-          }, 100);
-        };
+          // Always add to DOM (helps on all platforms)
+          document.body.appendChild(audioElement.current);
 
-        // Get local microphone stream
-        const ms = await navigator.mediaDevices.getUserMedia({
-          audio: true,
-        });
-        localStream.current = ms;
-        pc.addTrack(ms.getTracks()[0]);
+                    // Handle incoming audio stream - simplified
+          pc.ontrack = (e) => {
+            console.log("Audio track received");
 
-        const dc = pc.createDataChannel("oai-events");
-        setDataChannel(dc);
+            if (audioElement.current) {
+              audioElement.current.srcObject = e.streams[0];
 
-        const offer = await pc.createOffer();
-        await pc.setLocalDescription(offer);
+              // Simple play with error handling
+              audioElement.current.play()
+                .then(() => console.log("Audio playback started"))
+                .catch(err => {
+                  console.error("Audio playback failed:", err);
+                  setAudioError("Audio playback failed. Try clicking the screen.");
 
-        const baseUrl = "https://api.openai.com/v1/realtime";
-        const model = "gpt-4o-realtime-preview-2024-12-17";
-        const sdpResponse = await fetch(`${baseUrl}?model=${model}`, {
-          method: "POST",
-          body: offer.sdp,
-          headers: {
-            Authorization: `Bearer ${EPHEMERAL_KEY}`,
-            "Content-Type": "application/sdp",
-          },
-        });
+                  // Add a click handler to the document to try playing again
+                  // (iOS requires user interaction)
+                  const clickHandler = () => {
+                    audioElement.current.play()
+                      .then(() => {
+                        console.log("Audio playback started after user interaction");
+                        document.removeEventListener('click', clickHandler);
+                      })
+                      .catch(e => console.error("Audio play failed again:", e));
+                  };
 
-        const answer = {
-          type: "answer",
-          sdp: await sdpResponse.text(),
-        };
-        await pc.setRemoteDescription(answer);
+                  document.addEventListener('click', clickHandler, { once: true });
+                });
+            }
+          };
 
-        peerConnection.current = pc;
-      } catch (error) {
-        console.error('Failed to start session:', error);
-        setIsCalling(false);
-        setIsSessionActive(false);
-      }
-    }, 3000);
+                    // Get local microphone stream with error handling - simplified version
+          try {
+            const constraints = {
+              audio: true
+            };
+
+            // Get the microphone stream
+            const ms = await navigator.mediaDevices.getUserMedia(constraints);
+            localStream.current = ms;
+
+            // Add audio track to the connection
+            if (ms && ms.getAudioTracks().length > 0) {
+              const track = ms.getAudioTracks()[0];
+              pc.addTrack(track, ms);
+              console.log("Audio track added successfully");
+            }
+          } catch (micError) {
+            console.error("Microphone access error:", micError);
+            setAudioError("Could not access microphone. Please check permissions.");
+
+            // Continue without microphone - user can still listen
+          }
+
+          // Create data channel for events
+          const dc = pc.createDataChannel("oai-events", {
+            ordered: true
+          });
+          setDataChannel(dc);
+
+          // Create and send offer
+          const offer = await pc.createOffer({
+            offerToReceiveAudio: true,
+            offerToReceiveVideo: false
+          });
+          await pc.setLocalDescription(offer);
+
+          // Send offer to OpenAI
+          const baseUrl = "https://api.openai.com/v1/realtime";
+          const model = "gpt-4o-realtime-preview-2024-12-17";
+          const sdpResponse = await fetch(`${baseUrl}?model=${model}`, {
+            method: "POST",
+            body: offer.sdp,
+            headers: {
+              Authorization: `Bearer ${EPHEMERAL_KEY}`,
+              "Content-Type": "application/sdp",
+            },
+          });
+
+          // Process answer
+          if (!sdpResponse.ok) {
+            throw new Error(`API response error: ${sdpResponse.status}`);
+          }
+
+          const answer = {
+            type: "answer",
+            sdp: await sdpResponse.text(),
+          };
+          await pc.setRemoteDescription(answer);
+
+          peerConnection.current = pc;
+
+          // Add connection state monitoring
+          pc.oniceconnectionstatechange = () => {
+            console.log("ICE connection state:", pc.iceConnectionState);
+            if (pc.iceConnectionState === 'disconnected' ||
+                pc.iceConnectionState === 'failed' ||
+                pc.iceConnectionState === 'closed') {
+              // Handle disconnection gracefully
+              console.warn("ICE connection failed or closed");
+            }
+          };
+
+        } catch (error) {
+          console.error('Failed to start session:', error);
+          setIsCalling(false);
+          setIsSessionActive(false);
+          setAudioError("Call setup failed: " + error.message);
+        }
+      }, 3000);
+
+    } catch (error) {
+      console.error('Session start error:', error);
+      setIsCalling(false);
+      setAudioError("Call setup error: " + error.message);
+    }
   }
 
-  function stopSession() {
+  async function stopSession() {
+    // Play hangup sound
+    try {
+      playHangupSound();
+    } catch (error) {
+      console.warn('Hangup sound failed:', error);
+    }
+
+    // Close data channel
     if (dataChannel) {
-      dataChannel.close();
-    }
-
-    if (peerConnection.current) {
-      peerConnection.current.getSenders().forEach((sender) => {
-        if (sender.track) {
-          sender.track.stop();
-        }
-      });
-      peerConnection.current.close();
-    }
-
-    // Stop local stream
-    if (localStream.current) {
-      localStream.current.getTracks().forEach(track => track.stop());
-      localStream.current = null;
-    }
-
-    // Clean up audio element
-    if (audioElement.current) {
-      audioElement.current.srcObject = null;
-      audioElement.current = null;
-    }
-
-    // Play hangup sound non-blocking
-    setTimeout(() => {
       try {
-        playHangupSound();
-      } catch (error) {
-        console.log('Hangup sound failed:', error);
+        dataChannel.close();
+      } catch (err) {
+        console.warn("Error closing data channel:", err);
       }
-    }, 100);
+    }
 
+    // Close peer connection and stop tracks
+    if (peerConnection.current) {
+      try {
+        // Stop all tracks from senders
+        peerConnection.current.getSenders().forEach((sender) => {
+          if (sender.track) {
+            sender.track.stop();
+          }
+        });
+
+        // Close the connection
+        peerConnection.current.close();
+      } catch (err) {
+        console.warn("Error closing peer connection:", err);
+      }
+    }
+
+    // Stop local stream tracks
+    if (localStream.current) {
+      try {
+        localStream.current.getTracks().forEach(track => track.stop());
+        localStream.current = null;
+      } catch (err) {
+        console.warn("Error stopping local tracks:", err);
+      }
+    }
+
+        // Clean up audio element
+    if (audioElement.current) {
+      try {
+        audioElement.current.pause();
+        audioElement.current.srcObject = null;
+
+        // Remove from DOM
+        if (audioElement.current.parentNode) {
+          audioElement.current.parentNode.removeChild(audioElement.current);
+        }
+
+        audioElement.current = null;
+      } catch (err) {
+        console.warn("Error cleaning up audio element:", err);
+      }
+    }
+
+    // Reset all state
     stopCallTimer();
     setIsSessionActive(false);
     setIsCalling(false);
     setIsMuted(false);
     setIsSpeakerOn(false);
     setDataChannel(null);
+    setAudioError(null);
     peerConnection.current = null;
   }
 
@@ -256,8 +401,31 @@ export default function App() {
           },
         });
       });
+
+      // Handle data channel errors
+      dataChannel.addEventListener("error", (err) => {
+        console.error("Data channel error:", err);
+        setAudioError("Communication error. Please try again.");
+      });
+
+      // Handle data channel close
+      dataChannel.addEventListener("close", () => {
+        console.log("Data channel closed");
+      });
     }
   }, [dataChannel]);
+
+  // Add useEffect for handling audio initialization on component mount
+  useEffect(() => {
+    // Try to initialize audio system on component mount
+    // This won't work on iOS until user interaction, but helps on other platforms
+    initAudio(false).catch(console.error);
+
+    // Detect if we're on iOS and show appropriate message
+    if (isIOS()) {
+      console.log("iOS device detected - audio requires user interaction");
+    }
+  }, []);
 
   // Cleanup timer and audio on unmount
   useEffect(() => {
@@ -320,6 +488,16 @@ export default function App() {
                       <div className="text-gray-400 text-base animate-pulse">
                         Appel en cours...
                       </div>
+                      {isIOS() && (
+                        <div className="text-blue-400 text-xs mt-2">
+                          iOS device detected
+                        </div>
+                      )}
+                      {audioError && (
+                        <div className="text-red-400 text-xs mt-2 max-w-[200px] mx-auto">
+                          {audioError}
+                        </div>
+                      )}
                     </div>
                   </div>
                 ) : isSessionActive ? (
@@ -332,6 +510,21 @@ export default function App() {
                       <div className="text-green-400 text-base">
                         {formatCallDuration(callDuration)}
                       </div>
+                      {isIOS() && (
+                        <div className="text-blue-400 text-xs mt-2">
+                          iOS device
+                        </div>
+                      )}
+                      {audioError && (
+                        <div className="text-red-400 text-xs mt-2 max-w-[200px] mx-auto">
+                          {audioError}
+                        </div>
+                      )}
+                      {isMuted && (
+                        <div className="text-yellow-400 text-xs mt-1">
+                          Microphone muted
+                        </div>
+                      )}
                     </div>
                   </div>
                 ) : (
@@ -344,6 +537,16 @@ export default function App() {
                       <div className="text-gray-400 text-base">
                         Restaurant Zuma
                       </div>
+                      {isIOS() && (
+                        <div className="text-blue-400 text-xs mt-2">
+                          iOS device detected
+                        </div>
+                      )}
+                      {audioError && (
+                        <div className="text-red-400 text-xs mt-2 max-w-[200px] mx-auto">
+                          {audioError}
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}

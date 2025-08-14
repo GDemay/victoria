@@ -1,21 +1,36 @@
 // Create audio context for generating calling sounds
 let audioContext = null;
 
-export const initAudioContext = () => {
+// Audio context initialization that works across platforms
+export const initAudioContext = (userInitiated = false) => {
+  // iOS requires user interaction to create or resume audio context
   if (!audioContext) {
-    audioContext = new (window.AudioContext || window.webkitAudioContext)();
-
-    if (audioContext.state === 'suspended') {
-      audioContext.resume();
+    try {
+      audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    } catch (error) {
+      console.error("Failed to create AudioContext:", error);
+      return null;
     }
   }
+
+  // If context is suspended and this was triggered by user interaction, try to resume
+  if (audioContext?.state === 'suspended' && userInitiated) {
+    audioContext.resume().catch(err => {
+      console.warn("Failed to resume AudioContext:", err);
+    });
+  }
+
   return audioContext;
 };
 
 // Generate dial tone sound (2 seconds)
 export const playDialTone = () => {
   try {
-    const ctx = initAudioContext();
+    const ctx = initAudioContext(true);
+    if (!ctx) {
+      console.warn("AudioContext not available");
+      return;
+    }
 
     // Create oscillator for dial tone
     const oscillator = ctx.createOscillator();
@@ -48,7 +63,11 @@ export const playDialTone = () => {
 // Generate hangup sound (short beep)
 export const playHangupSound = () => {
   try {
-    const ctx = initAudioContext();
+    const ctx = initAudioContext(true);
+    if (!ctx) {
+      console.warn("AudioContext not available");
+      return;
+    }
 
     const oscillator = ctx.createOscillator();
     const gainNode = ctx.createGain();
@@ -74,7 +93,11 @@ export const playHangupSound = () => {
 // Generate ring tone sound
 export const playRingTone = () => {
   try {
-    const ctx = initAudioContext();
+    const ctx = initAudioContext(true);
+    if (!ctx) {
+      console.warn("AudioContext not available");
+      return;
+    }
 
     const oscillator = ctx.createOscillator();
     const gainNode = ctx.createGain();
@@ -85,16 +108,11 @@ export const playRingTone = () => {
     // Set frequency for ring tone
     oscillator.frequency.setValueAtTime(480, ctx.currentTime);
 
-    // Create pulsing effect
-    const pulseGain = ctx.createGain();
-    pulseGain.connect(gainNode);
-    oscillator.connect(pulseGain);
-
     // Set volume with pulsing
-    pulseGain.gain.setValueAtTime(0.2, ctx.currentTime);
-    pulseGain.gain.setValueAtTime(0.1, ctx.currentTime + 0.5);
-    pulseGain.gain.setValueAtTime(0.2, ctx.currentTime + 1);
-    pulseGain.gain.setValueAtTime(0.1, ctx.currentTime + 1.5);
+    gainNode.gain.setValueAtTime(0.2, ctx.currentTime);
+    gainNode.gain.setValueAtTime(0.1, ctx.currentTime + 0.5);
+    gainNode.gain.setValueAtTime(0.2, ctx.currentTime + 1);
+    gainNode.gain.setValueAtTime(0.1, ctx.currentTime + 1.5);
 
     // Start and stop after 2 seconds
     oscillator.start(ctx.currentTime);
@@ -102,4 +120,61 @@ export const playRingTone = () => {
   } catch (error) {
     console.log('Ring tone error:', error);
   }
+};
+
+// Detect iOS device
+export const isIOS = () => {
+  return [
+    'iPad Simulator',
+    'iPhone Simulator',
+    'iPod Simulator',
+    'iPad',
+    'iPhone',
+    'iPod'
+  ].includes(navigator.platform) ||
+  (navigator.userAgent.includes("Mac") && "ontouchend" in document);
+};
+
+// Setup audio for iOS - must be called from a user interaction event
+export const setupIOSAudio = () => {
+  if (!isIOS()) return true;
+
+  try {
+    // Create a silent audio buffer
+    const ctx = initAudioContext(true);
+    if (!ctx) return false;
+
+    // Just resume the audio context
+    if (ctx.state === 'suspended') {
+      ctx.resume();
+    }
+
+    return true;
+  } catch (error) {
+    console.error("iOS audio setup failed:", error);
+    return false;
+  }
+};
+
+// Initialize audio with fallbacks for cross-platform support
+export const initializeAudioSystem = (userInitiated = false) => {
+  // Try to initialize audio context
+  const ctx = initAudioContext(userInitiated);
+
+  // For iOS, we need special handling
+  if (isIOS()) {
+    setupIOSAudio();
+  }
+
+  return !!ctx;
+};
+
+/**
+ * Enhance an audio stream with audio processing
+ * @param {MediaStream} stream - The media stream to enhance
+ * @returns {MediaStream} - The enhanced media stream
+ */
+export const enhanceAudioStream = (stream) => {
+  // Just return the original stream since we're not using audio worklet
+  return stream;
 };

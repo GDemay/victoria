@@ -1,11 +1,13 @@
 import express from "express";
 import fs from "fs";
+import path from "path";
 import { createServer as createViteServer } from "vite";
 import "dotenv/config";
 
 const app = express();
 const port = process.env.PORT || 3000;
 const apiKey = process.env.OPENAI_API_KEY;
+const __dirname = path.resolve();
 
 // Configure Vite middleware for React client
 const vite = await createViteServer({
@@ -40,6 +42,18 @@ app.get("/token", async (req, res) => {
   }
 });
 
+// Serve audio worklet files with correct MIME type
+app.get("/client/utils/audioWorklet.js", (req, res) => {
+  const workletPath = path.join(__dirname, "client", "utils", "audioWorklet.js");
+
+  if (fs.existsSync(workletPath)) {
+    res.setHeader("Content-Type", "application/javascript");
+    res.sendFile(workletPath);
+  } else {
+    res.status(404).send("Audio worklet file not found");
+  }
+});
+
 // Render the React client
 app.use("*", async (req, res, next) => {
   const url = req.originalUrl;
@@ -61,4 +75,5 @@ app.use("*", async (req, res, next) => {
 
 app.listen(port, () => {
   console.log(`Express server running on *:${port}`);
+  console.log('Visit http://localhost:3000 to view the app');
 });
