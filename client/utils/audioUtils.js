@@ -3,6 +3,9 @@ let audioContext = null;
 
 // Audio context initialization that works across platforms
 export const initAudioContext = (userInitiated = false) => {
+  // Check if we're in a browser environment
+  if (!isBrowser) return null;
+
   // iOS requires user interaction to create or resume audio context
   if (!audioContext) {
     try {
@@ -122,8 +125,13 @@ export const playRingTone = () => {
   }
 };
 
-// Detect iOS device
+// Check if we're in a browser environment
+const isBrowser = typeof window !== 'undefined' && typeof navigator !== 'undefined';
+
+// Detect iOS device - safely check for browser environment first
 export const isIOS = () => {
+  if (!isBrowser) return false;
+
   return [
     'iPad Simulator',
     'iPhone Simulator',

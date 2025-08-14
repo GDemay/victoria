@@ -10,6 +10,15 @@ import {
 } from "../utils/audioUtils";
 import { frenchWaiterPrompt } from "../utils/promptLoader.js";
 
+// Helper to safely check for iOS during SSR
+const safeIsIOS = () => {
+  // Check if we're in a browser environment
+  if (typeof window === 'undefined' || typeof navigator === 'undefined') {
+    return false;
+  }
+  return isIOS();
+};
+
 export default function App() {
   const [isSessionActive, setIsSessionActive] = useState(false);
   const [isCalling, setIsCalling] = useState(false);
@@ -34,7 +43,7 @@ export default function App() {
       const success = await initializeAudioSystem(userInitiated);
 
       // Special handling for iOS
-      if (isIOS()) {
+      if (safeIsIOS()) {
         try {
           await setupIOSAudio();
         } catch (iosError) {
@@ -136,7 +145,10 @@ export default function App() {
           audioElement.current.setAttribute('webkit-playsinline', '');
 
           // Always add to DOM (helps on all platforms)
-          document.body.appendChild(audioElement.current);
+          // Check if we're in a browser environment first
+          if (typeof document !== 'undefined') {
+            document.body.appendChild(audioElement.current);
+          }
 
                     // Handle incoming audio stream - simplified
           pc.ontrack = (e) => {
@@ -422,7 +434,7 @@ export default function App() {
     initAudio(false).catch(console.error);
 
     // Detect if we're on iOS and show appropriate message
-    if (isIOS()) {
+    if (safeIsIOS()) {
       console.log("iOS device detected - audio requires user interaction");
     }
   }, []);
@@ -488,7 +500,7 @@ export default function App() {
                       <div className="text-gray-400 text-base animate-pulse">
                         Appel en cours...
                       </div>
-                      {isIOS() && (
+                      {safeIsIOS() && (
                         <div className="text-blue-400 text-xs mt-2">
                           iOS device detected
                         </div>
@@ -510,7 +522,7 @@ export default function App() {
                       <div className="text-green-400 text-base">
                         {formatCallDuration(callDuration)}
                       </div>
-                      {isIOS() && (
+                      {safeIsIOS() && (
                         <div className="text-blue-400 text-xs mt-2">
                           iOS device
                         </div>
@@ -537,7 +549,7 @@ export default function App() {
                       <div className="text-gray-400 text-base">
                         Restaurant Zuma
                       </div>
-                      {isIOS() && (
+                      {safeIsIOS() && (
                         <div className="text-blue-400 text-xs mt-2">
                           iOS device detected
                         </div>
