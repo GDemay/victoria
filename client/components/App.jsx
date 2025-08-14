@@ -20,6 +20,9 @@ const safeIsIOS = () => {
 };
 
 export default function App() {
+  // Use useEffect for hydration safety
+  const [isBrowser, setIsBrowser] = useState(false);
+  
   const [isSessionActive, setIsSessionActive] = useState(false);
   const [isCalling, setIsCalling] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
@@ -33,6 +36,11 @@ export default function App() {
   const audioElement = useRef(null);
   const localStream = useRef(null);
   const callTimerRef = useRef(null);
+  
+  // Set isBrowser to true after component mounts (client-side only)
+  useEffect(() => {
+    setIsBrowser(true);
+  }, []);
 
   const phoneNumber = "+33 4 93 38 12 34";
 
@@ -427,17 +435,20 @@ export default function App() {
     }
   }, [dataChannel]);
 
-  // Add useEffect for handling audio initialization on component mount
+    // Add useEffect for handling audio initialization on component mount
   useEffect(() => {
-    // Try to initialize audio system on component mount
-    // This won't work on iOS until user interaction, but helps on other platforms
-    initAudio(false).catch(console.error);
-
-    // Detect if we're on iOS and show appropriate message
-    if (safeIsIOS()) {
-      console.log("iOS device detected - audio requires user interaction");
+    // Only run on client side
+    if (isBrowser) {
+      // Try to initialize audio system on component mount
+      // This won't work on iOS until user interaction, but helps on other platforms
+      initAudio(false).catch(console.error);
+      
+      // Detect if we're on iOS and show appropriate message
+      if (safeIsIOS()) {
+        console.log("iOS device detected - audio requires user interaction");
+      }
     }
-  }, []);
+  }, [isBrowser]);
 
   // Cleanup timer and audio on unmount
   useEffect(() => {
@@ -500,7 +511,7 @@ export default function App() {
                       <div className="text-gray-400 text-base animate-pulse">
                         Appel en cours...
                       </div>
-                      {safeIsIOS() && (
+                      {isBrowser && safeIsIOS() && (
                         <div className="text-blue-400 text-xs mt-2">
                           iOS device detected
                         </div>
@@ -522,7 +533,7 @@ export default function App() {
                       <div className="text-green-400 text-base">
                         {formatCallDuration(callDuration)}
                       </div>
-                      {safeIsIOS() && (
+                      {isBrowser && safeIsIOS() && (
                         <div className="text-blue-400 text-xs mt-2">
                           iOS device
                         </div>
@@ -549,7 +560,7 @@ export default function App() {
                       <div className="text-gray-400 text-base">
                         Restaurant Zuma
                       </div>
-                      {safeIsIOS() && (
+                      {isBrowser && safeIsIOS() && (
                         <div className="text-blue-400 text-xs mt-2">
                           iOS device detected
                         </div>

@@ -9,5 +9,19 @@ export default {
   plugins: [react()],
   server: {
     allowedHosts: ["victoria-production.up.railway.app"]
+  },
+  build: {
+    minify: 'terser',
+    sourcemap: false,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'react-vendor': ['react', 'react-dom']
+        }
+      }
+    }
+  },
+  define: {
+    'process.env.NODE_ENV': JSON.stringify('production')
   }
 };
