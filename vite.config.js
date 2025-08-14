@@ -3,6 +3,7 @@ import { fileURLToPath } from "url";
 import react from "@vitejs/plugin-react";
 
 const path = fileURLToPath(import.meta.url);
+const isSSR = process.env.SSR === 'true';
 
 export default {
   root: join(dirname(path), "client"),
@@ -13,9 +14,15 @@ export default {
   build: {
     minify: 'terser',
     sourcemap: false,
+    terserOptions: {
+      compress: {
+        drop_console: true,
+        drop_debugger: true
+      }
+    },
     rollupOptions: {
       output: {
-        manualChunks: {
+        manualChunks: isSSR ? undefined : {
           'react-vendor': ['react', 'react-dom']
         }
       }

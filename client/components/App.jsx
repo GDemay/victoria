@@ -22,7 +22,7 @@ const safeIsIOS = () => {
 export default function App() {
   // Use useEffect for hydration safety
   const [isBrowser, setIsBrowser] = useState(false);
-  
+
   const [isSessionActive, setIsSessionActive] = useState(false);
   const [isCalling, setIsCalling] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
@@ -36,7 +36,7 @@ export default function App() {
   const audioElement = useRef(null);
   const localStream = useRef(null);
   const callTimerRef = useRef(null);
-  
+
   // Set isBrowser to true after component mounts (client-side only)
   useEffect(() => {
     setIsBrowser(true);
@@ -442,7 +442,7 @@ export default function App() {
       // Try to initialize audio system on component mount
       // This won't work on iOS until user interaction, but helps on other platforms
       initAudio(false).catch(console.error);
-      
+
       // Detect if we're on iOS and show appropriate message
       if (safeIsIOS()) {
         console.log("iOS device detected - audio requires user interaction");
