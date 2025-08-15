@@ -9,7 +9,7 @@ export default {
   root: join(dirname(path), "client"),
   plugins: [react()],
   server: {
-    allowedHosts: ["victoria-production.up.railway.app"]
+    allowedHosts: ["victoria-production.up.railway.app", "victoria.alfred-ai.fr"]
   },
   build: {
     minify: 'terser',
